@@ -1,0 +1,12 @@
+# Tencent Cloud SDK — covers CVM, VPC, CBS, TKE, AS, Lighthouse, Tag, COS
+tencentcloud-sdk-python>=3.0.110
+
+# COS Python SDK for uploading the report
+cos-python-sdk-v5>=1.9.30
+
+# Date/time utilities
+python-dateutil>=2.9.0
+
+# HTTP client — pinned for SCF compatibility
+requests==2.31.0
+urllib3<2.0

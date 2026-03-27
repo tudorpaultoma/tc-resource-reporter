@@ -1,0 +1,80 @@
+{
+  "version": "2.0",
+  "statement": [
+    {
+      "effect": "allow",
+      "action": [
+        "cvm:DescribeInstances"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "clb:DescribeLoadBalancers"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "cbs:DescribeDisks",
+        "cbs:DescribeSnapshots"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "vpc:DescribeAddresses",
+        "vpc:DescribeNetworkInterfaces",
+        "vpc:DescribeHaVips",
+        "vpc:DescribeNatGateways",
+        "vpc:DescribeCcns"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "tke:DescribeClusters"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "as:DescribeAutoScalingGroups",
+        "as:DescribeLaunchConfigurations"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "lighthouse:DescribeInstances",
+        "lighthouse:DescribeSnapshots"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "tag:DescribeResourcesByTags",
+        "tag:DescribeTagKeys",
+        "tag:DescribeTagValues"
+      ],
+      "resource": "*"
+    },
+    {
+      "effect": "allow",
+      "action": [
+        "cos:PutObject",
+        "cos:GetBucket"
+      ],
+      "resource": [
+        "qcs::cos:::*"
+      ]
+    }
+  ]
+}
