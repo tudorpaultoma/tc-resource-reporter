@@ -3,10 +3,11 @@ tencentcloud-sdk-python>=3.0.110
 
 # COS Python SDK for uploading the report
 cos-python-sdk-v5>=1.9.30
+crcmod>=1.7
 
 # Date/time utilities
 python-dateutil>=2.9.0
 
 # HTTP client — pinned for SCF compatibility
-requests==2.31.0
-urllib3<2.0
+requests>=2.28.0,<3.0
+urllib3>=1.26.0,<2.0

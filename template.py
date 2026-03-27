@@ -124,6 +124,7 @@ select.search-input { appearance: auto; cursor: pointer; }
   <div class="tabs" id="mainTabs">
     <div class="tab active" data-tab="all">All Resources</div>
     <div class="tab" data-tab="owners">By Owner</div>
+    <div class="tab" data-tab="byproject">By Project</div>
     <div class="tab" data-tab="expiring">Expiring Soon</div>
     <div class="tab" data-tab="expired">Already Expired</div>
     <div class="tab" data-tab="incomplete">Incomplete Tags</div>
@@ -167,6 +168,11 @@ select.search-input { appearance: auto; cursor: pointer; }
   <!-- By Owner -->
   <div class="tab-panel" id="panel-owners">
     ${owners_section}
+  </div>
+
+  <!-- By Project -->
+  <div class="tab-panel" id="panel-byproject">
+    ${by_project_section}
   </div>
 
   <!-- Expiring Soon -->
@@ -215,7 +221,7 @@ select.search-input { appearance: auto; cursor: pointer; }
       <table>
         <thead><tr>
           <th>Service</th><th>Resource ID</th><th>Name</th><th>Region</th>
-          <th>Owner</th><th>Created</th><th>TTL</th><th>Days Left</th>
+          <th>Owner</th><th>Created</th><th>TTL</th><th>Days Left</th><th>Project</th>
         </tr></thead>
         <tbody>${no_delete_no_project_rows}</tbody>
       </table>
@@ -306,16 +312,43 @@ def _badge(text, color="blue"):
     return f'<span class="badge badge-{color}">{_esc(text)}</span>'
 
 
-def _state_badge(state):
-    """Color-code resource state."""
-    s = str(state).upper()
-    if s in ("RUNNING", "ACTIVE", "BINDBOUND"):
-        return _badge(state, "green")
-    if s in ("STOPPED", "SHUTDOWN", "DETACHED", "AVAILABLE", "UNBIND"):
-        return _badge(state, "yellow")
+def _normalize_state(state):
+    """Normalize raw API state strings to unified display names and colors.
+
+    Returns (display_label, badge_color).
+    """
+    s = str(state).upper().strip()
+
+    # Green — healthy / operational
+    if s in ("RUNNING", "ACTIVE", "BIND", "BINDBOUND", "NORMAL"):
+        return "Active", "green"
+    if s == "ATTACHED":
+        return "Attached", "green"
+
+    # Yellow — idle but not problematic
+    if s in ("AVAILABLE", "UNATTACHED"):
+        return "Unattached", "yellow"
+
+    # Red — stopped / down / error
+    if s in ("STOPPED", "SHUTDOWN", "STOPPING"):
+        return "Stopped", "red"
+    if s in ("UNBIND", "DETACHED"):
+        return "Detached", "red"
     if s in ("TERMINATED", "DELETED", "ERROR", "FAILED"):
-        return _badge(state, "red")
-    return _badge(state, "blue")
+        return s.capitalize(), "red"
+    if s == "CREATING":
+        return "Creating", "blue"
+
+    # Fallback
+    return state, "blue"
+
+
+def _state_badge(state):
+    """Color-code resource state with normalized labels."""
+    if not state:
+        return _badge("—", "blue")
+    label, color = _normalize_state(state)
+    return _badge(label, color)
 
 
 def _days_left_badge(r):
@@ -404,6 +437,12 @@ def _incomplete_row(r):
 
 
 def _no_delete_no_project_row(r):
+    project = r.get("TaggerProject", "")
+    project_display = (
+        f'<span class="badge badge-red">MISSING</span>'
+        if not project or project.lower() == "n/a"
+        else _esc(project)
+    )
     return (
         f"<tr>"
         f"<td>{_badge(r.get('service',''))}</td>"
@@ -414,6 +453,7 @@ def _no_delete_no_project_row(r):
         f"<td>{_esc(r.get('TaggerCreated',''))}</td>"
         f"<td>{_esc(r.get('TaggerTTL',''))}</td>"
         f"<td>{_days_left_badge(r)}</td>"
+        f"<td>{project_display}</td>"
         f"</tr>"
     )
 
@@ -483,6 +523,49 @@ def _owners_section(by_owner):
 
 
 # ---------------------------------------------------------------------------
+# By-project section builder
+# ---------------------------------------------------------------------------
+def _by_project_section(resources):
+    """Build the 'By Project' tab — only resources with a real project tag."""
+    by_proj = {}
+    for r in resources:
+        proj = r.get("TaggerProject", "")
+        if proj and proj.lower() != "n/a":
+            by_proj.setdefault(proj, []).append(r)
+
+    if not by_proj:
+        return "<p>No resources with a project tag.</p>"
+
+    parts = []
+    for proj in sorted(by_proj.keys()):
+        res_list = by_proj[proj]
+        parts.append(f'<h3>{_esc(proj)} ({len(res_list)} resources)</h3>')
+        parts.append('<div class="table-wrap"><table>')
+        parts.append(
+            "<thead><tr><th>Service</th><th>Resource ID</th><th>Name</th>"
+            "<th>Region</th><th>State</th><th>Owner</th><th>TTL</th>"
+            "<th>Days Left</th><th>Can Delete</th></tr></thead><tbody>"
+        )
+        for r in res_list:
+            parts.append(
+                f"<tr>"
+                f"<td>{_badge(r.get('service',''))}</td>"
+                f"<td><code>{_esc(r.get('resource_id',''))}</code></td>"
+                f"<td>{_esc(r.get('resource_name',''))}</td>"
+                f"<td>{_esc(r.get('region',''))}</td>"
+                f"<td>{_state_badge(r.get('state',''))}</td>"
+                f"<td>{_esc(r.get('TaggerOwner',''))}</td>"
+                f"<td>{_esc(r.get('TaggerTTL',''))}</td>"
+                f"<td>{_days_left_badge(r)}</td>"
+                f"<td>{_esc(r.get('TaggerCanDelete',''))}</td>"
+                f"</tr>"
+            )
+        parts.append("</tbody></table></div>")
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def render_report(*, title, resources, stats, report_time, elapsed, regions_scanned, version):
@@ -495,6 +578,7 @@ def render_report(*, title, resources, stats, report_time, elapsed, regions_scan
         _no_delete_no_project_row(r) for r in stats["no_delete_no_project"]
     )
     owners_section = _owners_section(stats["by_owner"])
+    by_project_section = _by_project_section(resources)
 
     # Build region dropdown options
     region_options = "\n".join(
@@ -530,6 +614,7 @@ def render_report(*, title, resources, stats, report_time, elapsed, regions_scan
         no_delete_no_project_count=len(stats["no_delete_no_project"]),
         all_rows=all_rows,
         owners_section=owners_section,
+        by_project_section=by_project_section,
         expiring_rows=expiring_rows,
         expired_rows=expired_rows,
         incomplete_rows=incomplete_rows,

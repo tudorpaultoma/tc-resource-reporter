@@ -31,12 +31,20 @@ def scan_clb(region, cred):
 
         for lb in lbs:
             tags = {t.TagKey: t.TagValue for t in (lb.Tags or [])}
+            # CLB Status is numeric: 1 = active, 0 = not created
+            raw_status = lb.Status
+            if raw_status == 1:
+                state = "ACTIVE"
+            elif raw_status == 0:
+                state = "CREATING"
+            else:
+                state = str(raw_status) if raw_status is not None else ""
             resources.append({
                 "service": "clb",
                 "resource_id": lb.LoadBalancerId,
                 "resource_name": lb.LoadBalancerName or "",
                 "region": region,
-                "state": lb.Status or "",
+                "state": state,
                 "created_time": lb.CreateTime or "",
                 "TaggerOwner": tags.get("TaggerOwner", ""),
                 "TaggerCreated": tags.get("TaggerCreated", ""),

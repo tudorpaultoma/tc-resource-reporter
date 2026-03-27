@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.0.2 (2026-03-27)
+
+### Added
+- "By Project" tab — shows only resources with a real `TaggerProject` tag (excludes empty/n/a)
+- Project column added to the No-Delete Missing Project tab with red MISSING badge for resources lacking project justification
+
+### Fixed
+- CLB `Status` field is numeric (`1` = active) — now translated to human-readable "Active" instead of showing raw `1`
+- Unified all state labels across services: `RUNNING`, `ACTIVE`, `AVAILABLE`, `BIND`, `NORMAL`, `Running` → **Active** (green)
+- CBS disks: `ATTACHED` → **Attached** (green), `UNATTACHED` → **Unattached** (yellow)
+- `STOPPED`, `SHUTDOWN` → **Stopped** (red); `UNBIND`, `DETACHED` → **Detached** (red)
+- Mixed-case `Running` (Lighthouse/TKE) now normalised to uppercase before mapping
+- `output/` folder added to `.gitignore`
+
 ## v1.0.1 (2026-03-27)
 
 ### Added

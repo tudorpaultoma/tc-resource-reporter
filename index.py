@@ -4,7 +4,7 @@ Scans Tencent Cloud resources across regions, collects tag metadata,
 generates a static HTML dashboard and uploads it to COS.
 
 Author:  Tudor Toma
-Version: 1.0.1
+Version: 1.0.2
 License: GPL-3.0
 """
 
@@ -235,7 +235,7 @@ def compute_stats(resources):
 def main_handler(event, context):
     """SCF entry point (Timer trigger)."""
     t0 = time.time()
-    logger.info("tc-resource-reporter v1.0.1 — starting")
+    logger.info("tc-resource-reporter v1.0.2 — starting")
 
     try:
         sid, skey, token = _resolve_credentials()
@@ -261,7 +261,7 @@ def main_handler(event, context):
             report_time=report_ts,
             elapsed=elapsed,
             regions_scanned=len(regions),
-            version="1.0.1",
+            version="1.0.2",
         )
 
         upload_to_cos(html)
