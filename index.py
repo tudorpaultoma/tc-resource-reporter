@@ -3,11 +3,16 @@ TC Resource Reporter — SCF Handler & Orchestrator
 Scans Tencent Cloud resources across regions, collects tag metadata,
 generates a static HTML dashboard and uploads it to COS.
 
+Auth: The report is uploaded as report_<sha256>.html where the hash is
+derived from credentials stored in credentials.json or env vars.
+A login page (index.html) gates access via client-side hash verification.
+
 Author:  Tudor Toma
-Version: 1.0.2
+Version: 1.1.1
 License: GPL-3.0
 """
 
+import hashlib
 import json
 import logging
 import os
@@ -37,7 +42,7 @@ from services.tke import scan_tke
 from services.autoscaling import scan_autoscaling
 from services.lighthouse import scan_lighthouse
 
-from template import render_report
+from template import render_report, render_login
 from publisher import upload_to_cos
 
 # ---------------------------------------------------------------------------
@@ -79,7 +84,45 @@ def _cfg_services():
 
 EXPIRY_WARNING_DAYS = int(os.environ.get("EXPIRY_WARNING_DAYS", "3"))
 TIMEZONE_OFFSET = int(os.environ.get("TIMEZONE_OFFSET", "8"))
-REPORT_TITLE = os.environ.get("REPORT_TITLE", "TC Resource Report")
+REPORT_TITLE = os.environ.get("REPORT_TITLE", "Shared test account — Resource Usage Report")
+
+# ---------------------------------------------------------------------------
+# Report credential resolution (for hashed filename auth)
+# ---------------------------------------------------------------------------
+def _resolve_report_credentials():
+    """Return SHA-256 hex digest of 'username:password'.
+
+    Credentials are read from (in priority order):
+      1. Environment variables REPORT_USERNAME / REPORT_PASSWORD
+      2. credentials.json in the function root
+    """
+    username = os.environ.get("REPORT_USERNAME", "").strip()
+    password = os.environ.get("REPORT_PASSWORD", "").strip()
+
+    if not username or not password:
+        # Try loading from credentials.json (bundled in the zip)
+        cred_paths = [
+            os.path.join(os.path.dirname(__file__), "credentials.json"),
+            "/var/user/credentials.json",
+        ]
+        for p in cred_paths:
+            if os.path.isfile(p):
+                with open(p, "r") as f:
+                    creds = json.load(f)
+                username = creds.get("username", "").strip()
+                password = creds.get("password", "").strip()
+                if username and password:
+                    logger.info("Loaded report credentials from %s", p)
+                    break
+
+    if not username or not password:
+        raise RuntimeError(
+            "Report credentials not configured. Set REPORT_USERNAME + REPORT_PASSWORD "
+            "env vars, or include credentials.json in the deployment package."
+        )
+
+    raw = f"{username}:{password}"
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 # ---------------------------------------------------------------------------
 # Credential resolution (same pattern as sibling repos)
@@ -235,9 +278,13 @@ def compute_stats(resources):
 def main_handler(event, context):
     """SCF entry point (Timer trigger)."""
     t0 = time.time()
-    logger.info("tc-resource-reporter v1.0.2 — starting")
+    logger.info("tc-resource-reporter v1.1.1 — starting")
 
     try:
+        # --- Auth: compute report filename hash ---
+        report_hash = _resolve_report_credentials()
+        logger.info("Report hash prefix: %s...", report_hash[:8])
+
         sid, skey, token = _resolve_credentials()
         cred = tc_credential.Credential(sid, skey, token)
 
@@ -254,17 +301,26 @@ def main_handler(event, context):
         report_ts = datetime.now(tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
         elapsed = round(time.time() - t0, 1)
 
-        html = render_report(
+        report_html = render_report(
             title=REPORT_TITLE,
             resources=resources,
             stats=stats,
             report_time=report_ts,
             elapsed=elapsed,
             regions_scanned=len(regions),
-            version="1.0.2",
+            version="1.1.1",
         )
 
-        upload_to_cos(html)
+        login_html = render_login(
+            title=REPORT_TITLE,
+            version="1.1.1",
+        )
+
+        upload_to_cos(
+            login_html=login_html,
+            report_html=report_html,
+            report_hash=report_hash,
+        )
 
         summary = {
             "total_resources": stats["total"],

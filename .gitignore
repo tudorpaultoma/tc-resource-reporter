@@ -10,3 +10,5 @@ output/
 .env
 .venv/
 venv/
+credentials.json
+build_scf.sh

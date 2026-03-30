@@ -15,17 +15,19 @@ Part of the TC resource management suite:
 
 - **Multi-region scanning** — scans 15 Tencent Cloud regions
 - **16 resource types** — CVM, CLB, CBS, CBS Snapshots, EIP, ENI, HAVIP, NAT Gateway (public + private), CCN, TKE, Auto Scaling Groups, Auto Scaling Launch Configs, Lighthouse Instances, Lighthouse Snapshots
-- **Self-contained HTML** — single `index.html` with inline CSS & JS, no external dependencies
+- **Self-contained HTML** — single report file with inline CSS & JS, no external dependencies
+- **Login-gated access** — static login page with SHA-256 hashed filename; report URL is unguessable without credentials
 - **Dashboard sections**:
   - Executive summary cards (totals, warnings, alerts)
   - All Resources with search, region/owner dropdowns & column sorting
   - Resources grouped by Owner
+  - Resources grouped by Project
   - Expiring Soon (configurable threshold)
   - Already Expired (overdue resources)
   - Incomplete Tags (missing Owner/Created/TTL)
   - No-Delete Missing Project (TaggerCanDelete=NO without TaggerProject)
   - Distribution charts (by service, region, project, owner)
-- **COS upload** — publishes directly to a COS bucket for static website hosting
+- **COS upload** — publishes login page + hashed report to a COS bucket for static website hosting
 
 ## Supported Services
 
@@ -55,12 +57,15 @@ eu-frankfurt, na-siliconvalley, na-ashburn
 ### 1. Build Deployment Package
 
 ```bash
-pip install -t build/ -r requirements.txt
-cp -f index.py publisher.py template.py build/
-cp -rf services/ build/services/
-cp -rf policies/ build/policies/
-cd build && zip -qr ../scf-resource-reporter.zip . -x '*.pyc' '*__pycache__*'
+rm -rf package tc-resource-reporter.zip
+mkdir package
+pip3 install -t package -r requirements.txt
+cd package && zip -r9 ../tc-resource-reporter.zip . -x "*/__pycache__/*" "*/.DS_Store" && cd ..
+zip -r9 tc-resource-reporter.zip index.py template.py publisher.py credentials.json services/ policies/ \
+  -x "services/__pycache__/*" "*/.DS_Store"
 ```
+
+> **Important:** Include `credentials.json` in the zip (or set `REPORT_USERNAME` / `REPORT_PASSWORD` env vars in the SCF console).
 
 ### 2. Deploy to SCF
 
@@ -71,7 +76,7 @@ cd build && zip -qr ../scf-resource-reporter.zip . -x '*.pyc' '*__pycache__*'
 | Memory | 256 MB |
 | Timeout | 300 seconds |
 
-Upload `scf-resource-reporter.zip`.
+Upload `tc-resource-reporter.zip`.
 
 ### 3. Configure Environment Variables
 
@@ -79,14 +84,18 @@ Upload `scf-resource-reporter.zip`.
 |----------|----------|---------|-------------|
 | `COS_REPORT_BUCKET` | **Yes** | — | COS bucket name only (e.g. `my-reports-1234567890`) |
 | `COS_REPORT_REGION` | **Yes** | — | COS bucket region (e.g. `ap-singapore`) |
-| `COS_REPORT_KEY` | No | `index.html` | Object key for the report |
+| `COS_REPORT_KEY` | No | `index.html` | Upload path inside the bucket (e.g. `/Report/index.html`). The directory portion becomes the upload prefix for all files. |
+| `REPORT_USERNAME` | No* | — | Login username (alternative to `credentials.json`) |
+| `REPORT_PASSWORD` | No* | — | Login password (alternative to `credentials.json`) |
 | `REPORT_REGIONS` | No | all 15 regions | Comma-separated region list |
 | `REPORT_SERVICES` | No | all | Comma-separated service filter |
 | `EXPIRY_WARNING_DAYS` | No | `3` | Days before expiry to flag |
 | `TIMEZONE_OFFSET` | No | `8` | Hours offset from UTC |
 | `REPORT_TITLE` | No | `TC Resource Report` | Dashboard title |
 
-> **Note:** `COS_REPORT_BUCKET` must be the bucket name only — do not include paths. Use `COS_REPORT_KEY` for the object path.
+> **Note:** `COS_REPORT_BUCKET` must be the bucket name only — do not include paths.
+>
+> \* Credentials can be set via env vars **or** by including `credentials.json` in the deployment zip. Env vars take priority.
 
 ### 4. Set Timer Trigger
 
@@ -103,6 +112,45 @@ Attach `policies/reporter-policy.json` to the SCF execution role. The role requi
 - **Write** access to the target COS bucket
 - **Note:** EIP uses `vpc:DescribeAddresses` (not `cvm:DescribeAddresses`)
 
+## Authentication
+
+The dashboard is protected by a client-side login gate suitable for COS static hosting (no server needed).
+
+### How it works
+
+1. `index.html` is a **login page** — it prompts for username and password
+2. On submit, the browser computes `SHA-256(username + ":" + password)` using the Web Crypto API
+3. The browser attempts to fetch `report_<hash>.html` — if the hash matches, the report loads
+4. Without valid credentials, the report URL is **unguessable** (64-char hex hash)
+5. The report includes a **Logout** button that redirects back to the login page
+
+### Configuring credentials
+
+**Option 1 — `credentials.json`** (bundled in the zip, gitignored):
+
+```json
+{
+  "username": "admin",
+  "password": "your-secure-password"
+}
+```
+
+**Option 2 — Environment variables** (set in SCF console, takes priority):
+
+| Variable | Value |
+|----------|-------|
+| `REPORT_USERNAME` | `admin` |
+| `REPORT_PASSWORD` | `your-secure-password` |
+
+> When credentials change, the old report file is automatically deleted from COS on the next run.
+
+### Security notes
+
+- This is **not** server-side auth — it's security through an unguessable URL
+- If someone captures the full report URL, they can access it directly until the next credential change
+- For internal dashboards this provides practical access control without extra infrastructure
+- For stronger protection, consider making the COS bucket private and using CDN signed URLs
+
 ## COS Static Website Setup
 
 1. Create a COS bucket (e.g., `tc-reports-1234567890`)
@@ -115,8 +163,9 @@ Attach `policies/reporter-policy.json` to the SCF execution role. The role requi
 ```
 tc-resource-reporter/
 ├── index.py              # SCF handler & orchestrator
-├── template.py           # HTML template (inline CSS/JS)
-├── publisher.py          # COS upload logic
+├── template.py           # HTML templates (login + dashboard)
+├── publisher.py          # COS upload logic (login + hashed report)
+├── credentials.json      # Login credentials (gitignored)
 ├── services/
 │   ├── __init__.py
 │   ├── cvm.py
@@ -142,12 +191,14 @@ tc-resource-reporter/
 ## How It Works
 
 1. **Timer trigger** fires daily
-2. `main_handler` resolves SCF credentials and iterates regions × services
-3. Each service scanner lists resources via the Tencent Cloud SDK, extracting tag metadata
-4. `compute_stats` groups resources by owner, calculates expiry, flags incomplete tags
-5. `render_report` populates the HTML template with data
-6. `upload_to_cos` pushes `index.html` to the configured COS bucket
-7. Admin browses the COS static website URL
+2. `main_handler` loads report credentials and computes `SHA-256(username:password)` for the report filename
+3. Resolves SCF credentials and iterates regions × services
+4. Each service scanner lists resources via the Tencent Cloud SDK, extracting tag metadata
+5. `compute_stats` groups resources by owner, calculates expiry, flags incomplete tags
+6. `render_login` generates the login page (`index.html`)
+7. `render_report` populates the dashboard template (`report_<hash>.html`)
+8. `upload_to_cos` pushes both files and deletes any old report files from previous credential hashes
+9. Admin browses the COS static website URL, logs in, and views the dashboard
 
 ## Tags Used
 

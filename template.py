@@ -2,10 +2,110 @@
 HTML Report Template — self-contained static dashboard.
 All CSS and JS are inline. No external dependencies.
 Uses Python string.Template for safe placeholder substitution.
+
+Auth layer:
+  - login.html (uploaded as index.html) — prompts for username/password,
+    computes SHA-256(username:password) and redirects to report_<hash>.html.
+  - The actual report is uploaded as report_<hash>.html — unguessable without
+    knowing the credentials.
 """
 
 import html
 from string import Template
+
+from assets import BG_IMAGE_B64, FAVICON_B64, LOGO_IMAGE_B64
+
+
+# ---------------------------------------------------------------------------
+# Login page template
+# ---------------------------------------------------------------------------
+_LOGIN_TEMPLATE = Template(r"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title} — Login</title>
+<link rel="icon" type="image/png" href="${favicon}" />
+<style>
+:root {
+  --bg: #0f172a; --surface: #1e293b; --border: #334155;
+  --text: #e2e8f0; --text-muted: #94a3b8; --accent: #38bdf8;
+  --red: #f87171;
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh;
+       display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+/* Background image — blended, very transparent */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 0;
+  background: url('${bg_image}') center/cover no-repeat;
+  opacity: 0.12; pointer-events: none;
+}
+.login-card { position: relative; z-index: 1;
+              background: rgba(30,41,59,0.92); border: 1px solid var(--border); border-radius: 1rem;
+              padding: 2.5rem 2rem; width: 100%; max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+              backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+.login-card h1 { font-size: 1.35rem; font-weight: 700; margin-bottom: 0.25rem; }
+.login-card .subtitle { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+.field { margin-bottom: 1rem; }
+.field label { display: block; font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase;
+               letter-spacing: 0.05em; margin-bottom: 0.3rem; }
+.field input { width: 100%; background: rgba(15,23,42,0.8); border: 1px solid var(--border); border-radius: 0.5rem;
+               padding: 0.6rem 0.75rem; color: var(--text); font-size: 0.9rem; }
+.field input:focus { outline: none; border-color: var(--accent); }
+.btn { width: 100%; padding: 0.7rem; border: none; border-radius: 0.5rem; background: var(--accent);
+       color: #0f172a; font-size: 0.9rem; font-weight: 600; cursor: pointer; margin-top: 0.5rem;
+       transition: opacity 0.15s; }
+.btn:hover { opacity: 0.9; }
+.error { color: var(--red); font-size: 0.8rem; margin-top: 0.75rem; display: none; text-align: center; }
+.footer { text-align: center; margin-top: 1.5rem; color: var(--text-muted); font-size: 0.75rem; }
+</style>
+</head>
+<body>
+<div class="login-card">
+  <h1>${title}</h1>
+  <div class="subtitle">Enter credentials to view the dashboard</div>
+  <form id="loginForm" onsubmit="return handleLogin(event)">
+    <div class="field">
+      <label for="username">Username</label>
+      <input type="text" id="username" autocomplete="username" required autofocus />
+    </div>
+    <div class="field">
+      <label for="password">Password</label>
+      <input type="password" id="password" autocomplete="current-password" required />
+    </div>
+    <button type="submit" class="btn">Sign In</button>
+    <div class="error" id="errorMsg">Invalid credentials — report not found.</div>
+  </form>
+  <div class="footer">Reporter v${version}</div>
+</div>
+<script>
+async function handleLogin(e) {
+  e.preventDefault();
+  var u = document.getElementById('username').value.trim();
+  var p = document.getElementById('password').value;
+  if (!u || !p) return false;
+  var data = new TextEncoder().encode(u + ':' + p);
+  var hashBuf = await crypto.subtle.digest('SHA-256', data);
+  var hashArr = Array.from(new Uint8Array(hashBuf));
+  var hex = hashArr.map(function(b){ return b.toString(16).padStart(2,'0'); }).join('');
+  var reportUrl = 'report_' + hex + '.html';
+  /* Try fetching the report — if it 404s, credentials are wrong */
+  try {
+    var resp = await fetch(reportUrl, { method: 'HEAD' });
+    if (resp.ok) {
+      window.location.href = reportUrl;
+      return false;
+    }
+  } catch(err) { /* network error — try redirect anyway */ }
+  /* Fallback: redirect and let the browser handle 404 */
+  document.getElementById('errorMsg').style.display = 'block';
+  return false;
+}
+</script>
+</body>
+</html>""")
 
 # ---------------------------------------------------------------------------
 # CSS + JS + HTML skeleton
@@ -16,6 +116,7 @@ _TEMPLATE = Template(r"""<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
+<link rel="icon" type="image/png" href="${favicon}" />
 <style>
 :root {
   --bg: #0f172a; --surface: #1e293b; --border: #334155;
@@ -29,6 +130,8 @@ a { color: var(--accent); text-decoration: none; }
 
 /* Header */
 .header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 1.5rem 2rem; }
+.header-row { display: flex; align-items: center; gap: 1rem; }
+.header-logo { height: 36px; width: auto; }
 .header h1 { font-size: 1.5rem; font-weight: 700; }
 .header .meta { color: var(--text-muted); font-size: 0.85rem; margin-top: .25rem; }
 
@@ -96,6 +199,12 @@ select.search-input { appearance: auto; cursor: pointer; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
+/* Logout */
+.logout-btn { float: right; background: rgba(248,113,113,0.15); color: #f87171; border: 1px solid rgba(248,113,113,0.3);
+              padding: 0.35rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; font-weight: 600; cursor: pointer;
+              transition: background 0.15s; }
+.logout-btn:hover { background: rgba(248,113,113,0.3); }
+
 /* Footer */
 .footer { text-align: center; padding: 2rem; color: var(--text-muted); font-size: 0.8rem; border-top: 1px solid var(--border); margin-top: 2rem; }
 </style>
@@ -103,7 +212,11 @@ select.search-input { appearance: auto; cursor: pointer; }
 <body>
 
 <div class="header">
-  <h1>${title}</h1>
+  <button class="logout-btn" onclick="window.location.href='index.html'">Logout</button>
+  <div class="header-row">
+    <img class="header-logo" src="${logo_image}" alt="Tencent Cloud" />
+    <h1>${title}</h1>
+  </div>
   <div class="meta">Last updated: ${report_time} &nbsp;|&nbsp; Scanned ${regions_scanned} regions in ${elapsed}s &nbsp;|&nbsp; Reporter v${version}</div>
 </div>
 
@@ -605,6 +718,8 @@ def render_report(*, title, resources, stats, report_time, elapsed, regions_scan
         regions_scanned=regions_scanned,
         elapsed=elapsed,
         version=_esc(version),
+        favicon=FAVICON_B64,
+        logo_image=LOGO_IMAGE_B64,
         total=stats["total"],
         owner_count=len(stats["by_owner"]),
         expiring_soon_count=len(stats["expiring_soon"]),
@@ -622,4 +737,14 @@ def render_report(*, title, resources, stats, report_time, elapsed, regions_scan
         region_options=region_options,
         owner_options=owner_options,
         distribution_cards=distribution_cards,
+    )
+
+
+def render_login(*, title, version):
+    """Render the login page HTML."""
+    return _LOGIN_TEMPLATE.safe_substitute(
+        title=_esc(title),
+        version=_esc(version),
+        bg_image=BG_IMAGE_B64,
+        favicon=FAVICON_B64,
     )

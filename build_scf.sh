@@ -17,7 +17,7 @@ rm -rf package/bin 2>/dev/null || true
 
 echo "==> Building zip..."
 cd package && zip -r9 ../tc-resource-reporter.zip . -x ".DS_Store" && cd ..
-zip -r9 tc-resource-reporter.zip index.py template.py publisher.py services/ policies/ \
+zip -r9 tc-resource-reporter.zip index.py template.py publisher.py assets.py credentials.json services/ policies/ \
   -x "services/__pycache__/*" "*/.DS_Store"
 
 echo "==> Done!"

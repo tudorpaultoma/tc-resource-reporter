@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.1.1 (2026-03-30)
+
+### Fixed
+- `COS_REPORT_KEY` is now respected — the directory portion (e.g. `/Report/index.html` → `Report/`) is used as the upload prefix for login + report files
+- Files no longer land at bucket root when a key path is configured
+
+## v1.1.0 (2026-03-30)
+
+### Added
+- **Login page** — `index.html` is now a login gate; actual report is uploaded as `report_<sha256>.html` where the hash is derived from `SHA-256(username:password)`
+- **Logout button** — red button in the report header redirects back to login page
+- **Credentials** — configurable via `credentials.json` (gitignored) or `REPORT_USERNAME` / `REPORT_PASSWORD` env vars
+- **Automatic cleanup** — old `report_*.html` files in COS are deleted when credentials change
+- `credentials.json` and `build_scf.sh` added to `.gitignore`
+
+### Changed
+- `publisher.py` rewritten — now uploads two files (login + hashed report) and cleans up stale reports
+- `COS_REPORT_KEY` env var removed — the report key is now auto-generated from the credential hash
+- Version bumped to 1.1.0
+
 ## v1.0.2 (2026-03-27)
 
 ### Added
